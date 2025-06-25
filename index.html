@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hand Tracking App</title>
+    <link href="https://fonts.googleapis.com/css2?family=Xanh+Mono:ital@0;1&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Xanh Mono', monospace;
+        }
+        .container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            margin: auto;
+            border: 1px solid #333;
+        }
+        #webcam {
+            width: 100%;
+            height: auto;
+            display: block;
+            transform: scaleX(-1);
+        }
+        #overlayCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            transform: scaleX(-1);
+        }
+        .experiment-button {
+            background: #ffffff;
+            border: 1px solid #333;
+            padding: 0.275rem 0.50rem;
+            margin: 0.15rem 0.15rem;
+            font-family: 'Xanh Mono', monospace;
+            font-size: 0.875rem;
+            font-weight: 400;
+            cursor: pointer;
+            letter-spacing: 0.05em;
+        }
+        .experiment-button:hover {
+            background: #d4d4d4;
+        }
+        .experiment-button.active {
+            background: #333;
+            color: white;
+        }
+        .loader {
+            border: 8px solid #374151;
+            border-radius: 50%;
+            border-top: 8px solid #3b82f6;
+            width: 60px;
+            height: 60px;
+            animation: spin 2s linear infinite;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            margin-left: -30px;
+            margin-top: -30px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+    <!-- MediaPipe and drawing utils scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body class="bg-white text-black flex items-center justify-center min-h-screen p-4">
+
+    <div class="max-w-3xl w-full mx-auto p-4 md:p-8">
+        <div id="ui-container" class="text-center mb-4" style="display: none;">
+            <button class="experiment-button" data-experiment="dashed">EXP1</button>
+            <button class="experiment-button" data-experiment="dashed-sine">EXP2</button>
+            <button class="experiment-button" data-experiment="tangent-art">EXP3</button>
+            <button class="experiment-button" data-experiment="rectangle-art">EXP4</button>
+            <button class="experiment-button" data-experiment="orbiting-circles">EXP5</button>
+            <button class="experiment-button" data-experiment="magneto-balls">EXP6</button>
+            <button class="experiment-button active" data-experiment="aura-glow">EXP7</button>
+        </div>
+        
+        <div id="loading-spinner" class="flex justify-center items-center h-96">
+            <div class="loader"></div>
+            <p class="ml-4 text-lg">Starting camera...</p>
+        </div>
+
+        <div class="container" style="display: none;">
+            <video id="webcam" autoplay playsinline></video>
+            <canvas id="overlayCanvas"></canvas>
+        </div>
+    </div>
+
+    <script type="module">
+        // Get references to HTML elements
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('overlayCanvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const container = document.querySelector('.container');
+        const uiContainer = document.getElementById('ui-container');
+        const experimentButtons = document.querySelectorAll('.experiment-button');
+
+        // State variables
+        let animationFrame = 0;
+        let currentExperiment = 'aura-glow';
+        
+        // Update current experiment when buttons are clicked
+        experimentButtons.forEach(button => {
+            button.addEventListener('click', (e) => {
+                // Update active state of buttons
+                experimentButtons.forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+                
+                // Update current experiment
+                currentExperiment = button.dataset.experiment;
+            });
+        });
+
+        // This function will be called when hand tracking results are available
+        function onResults(results) {
+            animationFrame++;
+            canvasElement.width = videoElement.videoWidth;
+            canvasElement.height = videoElement.videoHeight;
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            // Draw hand skeletons
+            if (results.multiHandLandmarks) {
+                for (const landmarks of results.multiHandLandmarks) {
+                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#ffffff', lineWidth: 2});
+                    canvasCtx.strokeStyle = '#ffffff';
+                    canvasCtx.lineWidth = 2;
+                    for (const landmark of landmarks) {
+                         if (landmark) { // Check if landmark exists
+                            const x = landmark.x * canvasElement.width;
+                            const y = landmark.y * canvasElement.height;
+                            canvasCtx.beginPath();
+                            canvasCtx.arc(x, y, 6, 0, 2 * Math.PI);
+                            canvasCtx.stroke();
+                        }
+                    }
+                }
+            }
+
+            // Draw connections/effects based on the selected experiment
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length === 2) {
+                const [hand1, hand2] = results.multiHandLandmarks;
+                const fingerTips = [4, 8, 12, 16, 20]; // Thumb, Index, Middle, Ring, Pinky
+
+                switch (currentExperiment) {
+                    case 'dashed':
+                        drawDashedLines(hand1, hand2, fingerTips);
+                        break;
+                    case 'dashed-sine':
+                        drawDynamicSineWaves(hand1, hand2, fingerTips);
+                        break;
+                    case 'tangent-art':
+                        drawStringArt(hand1, hand2, fingerTips);
+                        break;
+                    case 'rectangle-art':
+                        drawRectangleArt(hand1, hand2);
+                        break;
+                    case 'orbiting-circles':
+                        drawOrbitingCircles(hand1, hand2, fingerTips);
+                        break;
+                    case 'magneto-balls':
+                        drawMagnetoBalls(hand1, hand2);
+                        break;
+                    case 'aura-glow':
+                        drawAuraGlow(hand1, hand2);
+                        break;
+                }
+            }
+        }
+
+        // Helper function to find the average position of a set of landmarks
+        function getAveragePosition(hand, indices) {
+            let sumX = 0, sumY = 0, count = 0;
+            for (const index of indices) {
+                if (hand && hand[index]) { // Check if hand and landmark exist
+                    sumX += hand[index].x;
+                    sumY += hand[index].y;
+                    count++;
+                }
+            }
+            if (count === 0) return null; // Return null if no valid landmarks found
+            return { x: sumX / count, y: sumY / count };
+        }
+
+        // --- Experiment 1: Dashed Lines ---
+        function drawDashedLines(hand1, hand2, fingerTips) {
+            canvasCtx.strokeStyle = '#ffffff';
+            canvasCtx.lineWidth = 2;
+            canvasCtx.setLineDash([5, 5]); // 5px dash, 5px gap
+            canvasCtx.lineDashOffset = -animationFrame;
+
+            for (const tipIndex of fingerTips) {
+                const p1 = hand1[tipIndex];
+                const p2 = hand2[tipIndex];
+                if (!p1 || !p2) continue; // Skip if a landmark is missing
+                canvasCtx.beginPath();
+                canvasCtx.moveTo(p1.x * canvasElement.width, p1.y * canvasElement.height);
+                canvasCtx.lineTo(p2.x * canvasElement.width, p2.y * canvasElement.height);
+                canvasCtx.stroke();
+            }
+            canvasCtx.setLineDash([]); // Reset line dash
+        }
+
+        // --- Experiment 2: Dynamic Sine Waves ---
+        function drawDynamicSineWaves(hand1, hand2, fingerTips) {
+            const phase = animationFrame * 0.05; // Animation speed
+            canvasCtx.strokeStyle = '#ffffff';
+            canvasCtx.lineWidth = 2;
+            canvasCtx.setLineDash([]); // Make it a solid line
+            canvasCtx.lineDashOffset = -animationFrame;
+
+            for (const tipIndex of fingerTips) {
+                const p1_norm = hand1[tipIndex];
+                const p2_norm = hand2[tipIndex];
+                if (!p1_norm || !p2_norm) continue; // Skip if a landmark is missing
+
+                const distance_norm = Math.hypot(p2_norm.x - p1_norm.x, p2_norm.y - p1_norm.y);
+                const normalized_distance = Math.min(distance_norm / 0.7, 1);
+
+                const min_amp = 2, max_amp = 40;
+                const amplitude = max_amp - (normalized_distance * (max_amp - min_amp));
+
+                const min_wave = 50, max_wave = 300;
+                const wavelength = min_wave + (normalized_distance * (max_wave - min_wave));
+                const frequency = (2 * Math.PI) / wavelength;
+
+                const p1 = {x: p1_norm.x * canvasElement.width, y: p1_norm.y * canvasElement.height};
+                const p2 = {x: p2_norm.x * canvasElement.width, y: p2_norm.y * canvasElement.height};
+
+                const dx = p2.x - p1.x;
+                const dy = p2.y - p1.y;
+                const distance_px = Math.hypot(dx, dy);
+                if (distance_px < 1) continue;
+
+                const angle = Math.atan2(dy, dx);
+                const segments = 50;
+                
+                canvasCtx.beginPath();
+                canvasCtx.moveTo(p1.x, p1.y);
+
+                for (let i = 0; i <= segments; i++) {
+                    const progress = i / segments;
+                    const distAlongLine = progress * distance_px;
+                    
+                    const linearX = p1.x + progress * dx;
+                    const linearY = p1.y + progress * dy;
+                    
+                    const waveOffset = amplitude * Math.sin(distAlongLine * frequency + phase);
+                    
+                    const waveX = linearX + waveOffset * Math.cos(angle + Math.PI / 2);
+                    const waveY = linearY + waveOffset * Math.sin(angle + Math.PI / 2);
+                    
+                    canvasCtx.lineTo(waveX, waveY);
+                }
+                canvasCtx.lineTo(p2.x, p2.y); // Connect wave to the second hand
+                canvasCtx.stroke();
+            }
+            canvasCtx.setLineDash([]); // Reset line dash
+        }
+
+        // --- Experiment 3: Tangent Art ---
+        // Art Direction Variables
+        const ART = {
+            // Wave animation
+            waveDirection: -1,        // -1 for reverse, 1 for forward
+            waveCount: 4,             // Number of waves
+            waveCrestWidth: 0.2,      // Width of each wave peak (0-1)
+            loopDuration: 200,        // Frames for one complete loop (slower)
+            
+            // Colors and opacity
+            peakOpacity: 0.9,         // Wave peak opacity (0-1)
+            valleyOpacity: 0.05,      // Wave valley opacity (0-1)
+            
+            // Shape
+            fingerRadius: 6,          // Radius of finger point circles
+            strokeWidth: 2,           // Width of shape outline
+
+            // Orbit animation (EXP 5)
+            orbitSpeed: 0.03,
+            circleRadius: 5,
+            orbitingCircles: 30,
+
+            // Magneto Balls (EXP 6)
+            magnetoBallRadius: 8,
+            magnetoOrbitRadius: 60,      // Increased orbit size
+            magnetoSpeed: 0.07,         // Increased speed
+            magnetoPitch: Math.PI / 3,  // 60-degree tilt for 3D effect
+
+            // Aura Glow (EXP 7) - Glow from the center between hands
+            auraBaseRadius: 20,
+            auraScale: 200
+        };
+
+        // Helper function to ensure value stays between 0 and 1
+        function normalizePosition(pos) {
+            return ((pos % 1) + 1) % 1;
+        }
+
+        function drawTangentShape(p1_norm, p2_norm) {
+            if (!p1_norm || !p2_norm) return; // Skip if a landmark is missing
+            const radius = ART.fingerRadius;
+
+            const p1 = { x: p1_norm.x * canvasElement.width, y: p1_norm.y * canvasElement.height };
+            const p2 = { x: p2_norm.x * canvasElement.width, y: p2_norm.y * canvasElement.height };
+
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const distance = Math.hypot(dx, dy);
+
+            if (distance < radius * 2) return;
+
+            // Vector perpendicular to the line connecting centers
+            const perpDx = -dy / distance;
+            const perpDy = dx / distance;
+            
+            // Tangent points for the first line
+            const t1_p1 = { x: p1.x + radius * perpDx, y: p1.y + radius * perpDy };
+            const t1_p2 = { x: p2.x + radius * perpDx, y: p2.y + radius * perpDy };
+            
+            // Tangent points for the second line
+            const t2_p1 = { x: p1.x - radius * perpDx, y: p1.y - radius * perpDy };
+            const t2_p2 = { x: p2.x - radius * perpDx, y: p2.y - radius * perpDy };
+
+            // Create gradient along the line connecting the two finger points
+            const gradient = canvasCtx.createLinearGradient(p1.x, p1.y, p2.x, p2.y);
+            
+            // --- Wave & Gradient Logic for seamless looping ---
+            
+            // 1. Calculate progress
+            let loopProgress = (animationFrame % ART.loopDuration) / ART.loopDuration;
+            if (ART.waveDirection === -1) {
+                loopProgress = 1 - loopProgress;
+            }
+            const waveSpacing = 1.0 / ART.waveCount;
+
+            // 2. Define colors and color stops map
+            const peakC = `rgba(255, 255, 255, ${ART.peakOpacity})`;
+            const valleyC = `rgba(255, 255, 255, ${ART.valleyOpacity})`;
+            const stops = new Map();
+
+            // 3. Determine initial color at position 0.0 for seamless wrap-around
+            let initialColor = valleyC;
+            for (let i = 0; i < ART.waveCount; i++) {
+                const p = normalizePosition(loopProgress + i * waveSpacing);
+                if (p + ART.waveCrestWidth > 1.0) {
+                    initialColor = peakC;
+                    break;
+                }
+            }
+            stops.set(0, initialColor);
+
+            // 4. Add color stops for each wave
+            for (let i = 0; i < ART.waveCount; i++) {
+                const p = normalizePosition(loopProgress + i * waveSpacing);
+                const e = p + ART.waveCrestWidth;
+
+                stops.set(p, peakC);
+                
+                if (e <= 1.0) {
+                    stops.set(e, valleyC);
+                } else {
+                    // This wave wraps around the 1.0 boundary
+                    stops.set(1, peakC);
+                    stops.set(normalizePosition(e), valleyC);
+                }
+            }
+
+            // 5. Add all calculated stops to the gradient, sorted by position
+            [...stops.entries()]
+                .sort((a,b) => a[0] - b[0])
+                .forEach(([pos, color]) => {
+                    gradient.addColorStop(pos, color);
+                });
+
+            // Draw filled shape connecting all tangent points
+            canvasCtx.fillStyle = gradient;
+            canvasCtx.beginPath();
+            canvasCtx.moveTo(t1_p1.x, t1_p1.y);
+            canvasCtx.lineTo(t1_p2.x, t1_p2.y);
+            canvasCtx.lineTo(t2_p2.x, t2_p2.y);
+            canvasCtx.lineTo(t2_p1.x, t2_p1.y);
+            canvasCtx.closePath();
+            canvasCtx.fill();
+            canvasCtx.stroke();
+        }
+
+        function drawStringArt(hand1, hand2, fingerTips) {
+            canvasCtx.strokeStyle = '#ffffff';
+            canvasCtx.lineWidth = ART.strokeWidth;
+            canvasCtx.setLineDash([]); // Solid lines
+
+            for (const tipIndex of fingerTips) {
+                drawTangentShape(hand1[tipIndex], hand2[tipIndex]);
+            }
+        }
+
+        // --- Experiment 4: Rectangle Art ---
+        function drawRectangleArt(hand1, hand2) {
+            canvasCtx.strokeStyle = '#ffffff';
+            canvasCtx.lineWidth = ART.strokeWidth;
+            canvasCtx.setLineDash([]); // Solid lines
+
+            const thumbTip = 4;
+            const littleTip = 20;
+
+            // Horizontal connections
+            drawTangentShape(hand1[thumbTip], hand2[thumbTip]); // Thumbs
+            drawTangentShape(hand1[littleTip], hand2[littleTip]); // Little fingers
+
+            // Vertical connections
+            drawTangentShape(hand1[thumbTip], hand1[littleTip]); // Left hand
+            drawTangentShape(hand2[thumbTip], hand2[littleTip]); // Right hand
+        }
+
+        // --- Experiment 5: Orbiting Circles ---
+        function drawOrbitingCircles(hand1, hand2, fingerTips) {
+            canvasCtx.fillStyle = '#ffffff';
+            
+            if (fingerTips.length === 0) return;
+
+            const midpoints = [];
+            let sumX = 0, sumY = 0;
+
+            // 1. Calculate midpoints and their centroid
+            for (const tipIndex of fingerTips) {
+                const p1 = hand1[tipIndex];
+                const p2 = hand2[tipIndex];
+                if (!p1 || !p2) continue; // Skip if a landmark is missing
+                const midX = ((p1.x + p2.x) / 2) * canvasElement.width;
+                const midY = ((p1.y + p2.y) / 2) * canvasElement.height;
+                midpoints.push({ x: midX, y: midY });
+                sumX += midX;
+                sumY += midY;
+            }
+
+            if (midpoints.length === 0) return; // Exit if no midpoints were calculated
+
+            const centroidX = sumX / midpoints.length;
+            const centroidY = sumY / midpoints.length;
+
+            if (midpoints.length < 2) { // Need at least 2 points to define an ellipse
+                 canvasCtx.beginPath();
+                 canvasCtx.arc(centroidX, centroidY, ART.circleRadius, 0, 2 * Math.PI);
+                 canvasCtx.fill();
+                 return;
+            }
+
+            // 2. Calculate dynamic radius scaling based on hand distance
+            let avgHandDist = 0;
+            let validPairs = 0;
+            for (const tipIndex of fingerTips) {
+                const p1 = hand1[tipIndex];
+                const p2 = hand2[tipIndex];
+                if (!p1 || !p2) continue; // Skip if a landmark is missing
+                avgHandDist += Math.hypot(p1.x - p2.x, p1.y - p2.y);
+                validPairs++;
+            }
+            if (validPairs === 0) return; // Exit if no valid pairs
+            avgHandDist /= validPairs; // Normalized distance
+
+            // Map distance to a scale factor. These values are tuned to feel responsive.
+            const minHandDist = 0.15; // The distance at which we start scaling up
+            const maxHandDist = 0.8;  // The distance at which we reach max scale
+            const minScale = 0.4;
+            const maxScale = 1.6;
+            let radiusScale = minScale + ((avgHandDist - minHandDist) / (maxHandDist - minHandDist)) * (maxScale - minScale);
+            radiusScale = Math.max(minScale, Math.min(maxScale, radiusScale)); // Clamp scale
+
+            // 3. Calculate covariance matrix components to find orientation
+            let varX = 0, varY = 0, covXY = 0;
+            for (const p of midpoints) {
+                const dx = p.x - centroidX;
+                const dy = p.y - centroidY;
+                varX += dx * dx;
+                varY += dy * dy;
+                covXY += dx * dy;
+            }
+            varX /= midpoints.length;
+            varY /= midpoints.length;
+            covXY /= midpoints.length;
+
+            // 4. Determine ellipse orientation angle from covariance matrix
+            const ellipseAngle = 0.5 * Math.atan2(2 * covXY, varX - varY);
+
+            // 5. Determine ellipse radii by projecting points onto the determined axes
+            let maxProjectedDistSq = 0;
+            let minProjectedDistSq = 0;
+            const cosA = Math.cos(ellipseAngle);
+            const sinA = Math.sin(ellipseAngle);
+
+            for (const p of midpoints) {
+                const dx = p.x - centroidX;
+                const dy = p.y - centroidY;
+                const projMajor = dx * cosA + dy * sinA; // Project onto major axis
+                const projMinor = -dx * sinA + dy * cosA; // Project onto minor axis
+                maxProjectedDistSq = Math.max(maxProjectedDistSq, projMajor * projMajor);
+                minProjectedDistSq = Math.max(minProjectedDistSq, projMinor * projMinor);
+            }
+            const majorRadius = Math.sqrt(maxProjectedDistSq) * radiusScale;
+            const minorRadius = Math.sqrt(minProjectedDistSq) * radiusScale;
+            
+            // Draw points orbiting on the calculated ellipse
+            const numPoints = ART.orbitingCircles;
+            // Use negative speed for clockwise rotation as per user sketch
+            const rotationOffset = animationFrame * -ART.orbitSpeed;
+
+            for (let i = 0; i < numPoints; i++) {
+                const theta = rotationOffset + (2 * Math.PI * i) / numPoints;
+                const unrotatedX = majorRadius * Math.cos(theta);
+                const unrotatedY = minorRadius * Math.sin(theta);
+
+                // Rotate point to match ellipse orientation
+                const finalX = centroidX + unrotatedX * cosA - unrotatedY * sinA;
+                const finalY = centroidY + unrotatedX * sinA + unrotatedY * cosA;
+
+                canvasCtx.beginPath();
+                canvasCtx.arc(finalX, finalY, ART.circleRadius, 0, 2 * Math.PI);
+                canvasCtx.fill();
+            }
+        }
+
+        // --- Experiment 6: Magneto Balls ---
+        function drawMagnetoBalls(hand1, hand2) {
+            const palmIndices = [0, 5, 9, 13, 17]; // Wrist and finger MCP joints
+
+            // 1. Find the center of the effect between the two palms
+            const palmCenter1 = getAveragePosition(hand1, palmIndices);
+            const palmCenter2 = getAveragePosition(hand2, palmIndices);
+            if (!palmCenter1 || !palmCenter2) return; // Skip if palms not detected
+
+            const cx = ((palmCenter1.x + palmCenter2.x) / 2) * canvasElement.width;
+            const cy = ((palmCenter1.y + palmCenter2.y) / 2) * canvasElement.height;
+            
+            // 2. Determine the orientation of the hands to align the orbit
+            const dx = (palmCenter2.x - palmCenter1.x) * canvasElement.width;
+            const dy = (palmCenter2.y - palmCenter1.y) * canvasElement.height;
+            const planeAngle = Math.atan2(dy, dx);
+
+            // 3. Calculate positions for each ball using 3D rotation
+            const balls = [];
+            const numBalls = 3;
+            const cosPitch = Math.cos(ART.magnetoPitch);
+            const sinPitch = Math.sin(ART.magnetoPitch);
+            const cosPlane = Math.cos(planeAngle);
+            const sinPlane = Math.sin(planeAngle);
+
+            for (let i = 0; i < numBalls; i++) {
+                const angle = animationFrame * ART.magnetoSpeed;
+                const phase = (i * 2 * Math.PI) / numBalls;
+                
+                // Use slightly different frequencies for each axis for complex, non-repeating motion
+                const angleX = angle * 1.1 + phase;
+                const angleY = angle * 0.9 + phase;
+                const angleZ = angle * 1.2 + phase;
+
+                // Calculate position in a local 3D space
+                const localX = ART.magnetoOrbitRadius * Math.cos(angleX);
+                const localY = ART.magnetoOrbitRadius * Math.sin(angleY);
+                const localZ = ART.magnetoOrbitRadius * Math.sin(angleZ) * 0.5; // Z-axis wobble
+
+                // --- 3D Rotation ---
+                // First, tilt the orbit plane (pitch around local X-axis)
+                const pitchedY = localY * cosPitch - localZ * sinPitch;
+                const pitchedZ = localY * sinPitch + localZ * cosPitch;
+                
+                // Then, orient the tilted plane with the hands (yaw around view's Z-axis)
+                const finalX = cx + (localX * cosPlane - pitchedY * sinPlane);
+                const finalY = cy + (localX * sinPlane + pitchedY * cosPlane);
+                
+                balls.push({ x: finalX, y: finalY, z: pitchedZ });
+            }
+            
+            // 4. Sort balls by z-index and draw them at a constant size and opacity
+            canvasCtx.fillStyle = '#ffffff';
+            balls.sort((a, b) => a.z - b.z).forEach(ball => {
+                canvasCtx.beginPath();
+                canvasCtx.arc(ball.x, ball.y, ART.magnetoBallRadius, 0, 2 * Math.PI);
+                canvasCtx.fill();
+            });
+        }
+
+        // --- Experiment 7: Aura Glow ---
+        function drawAuraGlow(hand1, hand2) {
+            const palmIndices = [0, 5, 9, 13, 17];
+
+            // 1. Calculate distance between palms to control intensity
+            const p1 = getAveragePosition(hand1, palmIndices);
+            const p2 = getAveragePosition(hand2, palmIndices);
+            if (!p1 || !p2) return; // Skip if palms not detected
+
+            const handDist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+
+            // 2. Inverse relationship: closer hands = more intense glow
+            const maxDist = 0.7; // The distance at which the glow is minimal
+            const intensity = Math.max(0, 1 - (handDist / maxDist));
+            
+            // 3. Find the center point for the effects
+            const centerX = ((p1.x + p2.x) / 2) * canvasElement.width;
+            const centerY = ((p1.y + p2.y) / 2) * canvasElement.height;
+
+            // 4. Draw the huge blurry glow (background effect)
+            if (intensity > 0) {
+                const glowRadius = intensity * 300; // Much larger and blurrier
+                const glowOpacity = Math.min(1.0, intensity * 3); // Can reach full brightness
+                
+                const grad = canvasCtx.createRadialGradient(centerX, centerY, 0, centerX, centerY, glowRadius);
+                grad.addColorStop(0, `rgba(255, 255, 255, ${glowOpacity})`);
+                grad.addColorStop(0.3, `rgba(255, 255, 255, ${glowOpacity * 0.7})`);
+                grad.addColorStop(0.6, `rgba(255, 255, 255, ${glowOpacity * 0.3})`);
+                grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                canvasCtx.fillStyle = grad;
+                canvasCtx.beginPath();
+                canvasCtx.arc(centerX, centerY, glowRadius, 0, 2 * Math.PI);
+                canvasCtx.fill();
+            }
+
+            // 5. Draw the small stroked sphere (scales down to 0 but stays solid white)
+            if (intensity > 0) {
+                const strokeRadius = intensity * 40; // Scales from 0 to 40px
+                
+                if (strokeRadius > 0.5) { // Only draw if radius is meaningful
+                    canvasCtx.strokeStyle = '#ffffff'; // Always solid white
+                    canvasCtx.lineWidth = 2;
+                    canvasCtx.beginPath();
+                    canvasCtx.arc(centerX, centerY, strokeRadius, 0, 2 * Math.PI);
+                    canvasCtx.stroke();
+                }
+            }
+        }
+
+        // Initialize the Hand tracking model
+        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+        hands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        hands.onResults(onResults);
+
+        // Initialize the camera utility
+        const camera = new Camera(videoElement, {
+            onFrame: async () => await hands.send({image: videoElement}),
+            width: 640,
+            height: 480
+        });
+        camera.start().then(() => {
+            loadingSpinner.style.display = 'none';
+            container.style.display = 'block';
+            uiContainer.style.display = 'block';
+        }).catch(err => {
+            console.error("Error starting camera:", err);
+            loadingSpinner.innerHTML = '<p class="text-red-500">Could not start camera. Please ensure you have a webcam enabled and have granted permission.</p>';
+        });
+
+        // Handle window resizing
+        window.addEventListener('resize', () => {
+            if (camera && camera.video) {
+                canvasElement.width = camera.video.videoWidth;
+                canvasElement.height = camera.video.videoHeight;
+            }
+        });
+    </script>
+</body>
+</html>
